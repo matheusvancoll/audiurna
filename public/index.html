@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apuração TSE — candidatos por horário de encerramento</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --text:#1b1f24; --muted:#6b7280; --border:#e3e6ea; --accent:#2563eb; --bar:#c7cdd6; --chip:#eef2ff;
+    --c1:#2563eb; --c2:#f59e0b; --c3:#10b981; --c4:#8b5cf6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1318; --card:#171c23; --text:#e6e9ee; --muted:#9aa3b0; --border:#262d37; --accent:#60a5fa; --bar:#3a4350; --chip:#1e2a44;
+            --c1:#60a5fa; --c2:#fbbf24; --c3:#34d399; --c4:#a78bfa; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:1200px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  .muted { color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-bottom:14px; }
+  .head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  select, input[type=time] { font:inherit; color:var(--text); background:var(--card); border:1px solid var(--border); border-radius:6px; padding:7px 8px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; align-items:center; }
+  .chips span { font-size:12px; color:var(--muted); }
+  button { font:inherit; color:var(--text); background:var(--chip); border:1px solid var(--border); border-radius:999px; padding:5px 12px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
+  .kpi { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  .kpi small { color:var(--muted); display:block; }
+  .kpi b { font-size:22px; font-variant-numeric:tabular-nums; }
+  .chart-wrap { position:relative; height:280px; }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  th.r, td.r { text-align:right; }
+  td.local { white-space:normal; min-width:220px; }
+  td.best { font-weight:700; color:var(--accent); }
+  .pager { display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:10px; color:var(--muted); }
+  .msg { color:var(--muted); padding:12px 0; }
+  .err { color:#dc2626; }
+  .leader { display:flex; align-items:baseline; gap:18px; flex-wrap:wrap; padding:6px 0 12px; }
+  .leader .who { font-size:20px; font-weight:700; }
+  .leader .big { font-size:34px; font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; line-height:1; }
+  .leader small { color:var(--muted); display:block; }
+  .bar { height:8px; background:var(--border); border-radius:4px; min-width:120px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--accent); }
+  tr.sep td { color:var(--muted); }
+  tr.tot td { font-weight:600; border-bottom:0; }
+  .link { background:none; border:0; color:var(--accent); padding:4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Candidatos por horário de encerramento</h1>
+  <p class="sub">Votos do boletim de urna (TSE) somados só das seções que casam com os filtros. Horários como constam no arquivo do TSE.</p>
+
+  <section class="card">
+    <div class="filters">
+      <label>Eleição / turno <select id="periodo"></select></label>
+      <label>Cargo <select id="cargo"><option value="">—</option></select></label>
+      <label>UF <select id="uf"><option value="">Todas</option></select></label>
+      <label>Município <select id="municipio" disabled><option value="">Todos</option></select></label>
+      <label>Encerrada a partir de <input type="time" id="de"></label>
+      <label>Encerrada antes de <input type="time" id="ate"></label>
+    </div>
+    <div class="chips">
+      <span>Atalhos:</span>
+      <button data-de="17:00" data-ate="17:30">17:00 – 17:30</button>
+      <button data-de="17:30" data-ate="19:00">17:30 – 19:00</button>
+      <button data-de="19:00" data-ate="">Depois das 19h</button>
+      <button data-de="" data-ate="17:00">Antes das 17h</button>
+      <button data-de="" data-ate="">Limpar horário</button>
+    </div>
+  </section>
+
+  <div id="erro" class="msg err" hidden></div>
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <div class="head"><b>Quem está na frente</b><span class="muted" id="rankSub"></span></div>
+    <div id="rank"><div class="msg">Carregando…</div></div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <b>% dos votos válidos por faixa de horário</b>
+      <span class="muted">usa período, cargo, UF e município; ignora o horário escolhido acima</span>
+    </div>
+    <div class="chart-wrap"><canvas id="chartComp"></canvas></div>
+    <div class="table-wrap" id="comp" style="margin-top:10px"></div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <b>Seções encerradas por horário</b>
+      <label style="flex-direction:row;align-items:center;gap:8px">Faixa do gráfico
+        <select id="bucket"><option value="10">10 min</option><option value="15">15 min</option><option value="30" selected>30 min</option><option value="60">1 hora</option></select>
+      </label>
+    </div>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="card">
+    <div class="head">
+      <b id="tituloTabela">Seções</b>
+      <label style="flex-direction:row;align-items:center;gap:8px">Ordem
+        <select id="order"><option value="asc">Encerradas mais cedo primeiro</option><option value="desc">Encerradas mais tarde primeiro</option></select>
+      </label>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>UF</th><th>Município</th><th>Zona</th><th>Seção</th><th>Local de votação</th><th>Aptos</th><th>Compar.</th><th>Abertura</th><th>Encerramento</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button id="prev">‹ Anterior</button>
+      <span id="pageInfo"></span>
+      <button id="next">Próxima ›</button>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { page: 1, limit: 50, total: 0, chart: null, chartComp: null, showAll: false, analise: null, seq: 0 };
+
+// Faixas usadas na comparação. Edite à vontade (de/ate em HH:MM; vazio = sem limite).
+const FAIXAS = [
+  { nome: 'Todas as seções', de: '', ate: '' },
+  { nome: '17:00 – 17:30', de: '17:00', ate: '17:30' },
+  { nome: '17:30 – 19:00', de: '17:30', ate: '19:00' },
+  { nome: 'Depois das 19h', de: '19:00', ate: '' },
+];
+
+const num = (n) => Number(n ?? 0).toLocaleString('pt-BR');
+const pct = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const hhmmss = (dt) => (dt ? dt.slice(11, 19) : '—');
+const dia = (dt) => (dt ? dt.slice(8, 10) + '/' + dt.slice(5, 7) : '');
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+async function api(path, p) {
+  const r = await fetch(path + '?' + new URLSearchParams(p));
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    const e = new Error(body.erro ?? r.statusText);
+    e.status = r.status;
+    throw e;
+  }
+  return r.json();
+}
+
+function params(extra = {}) {
+  const [ano, turno] = ($('periodo').value || '-').split('-');
+  const p = { ano, turno, uf: $('uf').value, municipio: $('municipio').value, de: $('de').value, ate: $('ate').value, ...extra };
+  Object.keys(p).forEach((k) => { if (p[k] === '' || p[k] == null) delete p[k]; });
+  return p;
+}
+
+function showError(e) { $('erro').hidden = !e; $('erro').textContent = e ? 'Erro: ' + e.message : ''; }
+
+function descFiltro(de, ate) {
+  if (de && ate) return `encerradas entre ${de} e ${ate}`;
+  if (de) return `encerradas a partir de ${de}`;
+  if (ate) return `encerradas antes de ${ate}`;
+  return 'todas as seções';
+}
+
+/* ---------- filtros ---------- */
+async function loadPeriodos() {
+  const ps = await api('/api/periodos', {});
+  if (!ps.length) { $('periodo').innerHTML = '<option value="">Sem dados</option>'; throw new Error('Nenhuma seção no banco. Rode a ingestão primeiro.'); }
+  $('periodo').innerHTML = ps.map((p) => `<option value="${p.ano}-${p.turno}">${p.ano} — ${p.turno}º turno</option>`).join('');
+}
+
+async function loadUfs() {
+  const ufs = await api('/api/ufs', params({ uf: '', municipio: '', de: '', ate: '' }));
+  $('uf').innerHTML = '<option value="">Todas</option>' + ufs.map((u) => `<option>${esc(u)}</option>`).join('');
+  await loadMunicipios();
+}
+
+async function loadMunicipios() {
+  const sel = $('municipio');
+  if (!$('uf').value) { sel.innerHTML = '<option value="">Todos</option>'; sel.disabled = true; return; }
+  const ms = await api('/api/municipios', params({ municipio: '', de: '', ate: '' }));
+  sel.innerHTML = '<option value="">Todos</option>' + ms.map((m) => `<option value="${m.cd_municipio}">${esc(m.nm_municipio ?? m.cd_municipio)}</option>`).join('');
+  sel.disabled = false;
+}
+
+async function loadCargos() {
+  const sel = $('cargo');
+  const anterior = sel.value;
+  try {
+    const cs = await api('/api/cargos', params({ uf: '', municipio: '', de: '', ate: '' }));
+    sel.innerHTML = cs.length
+      ? cs.map((c) => `<option value="${c.cd_cargo}">${esc(c.ds_cargo ?? 'Cargo ' + c.cd_cargo)}</option>`).join('')
+      : '<option value="">Sem votos</option>';
+    if (anterior && cs.some((c) => String(c.cd_cargo) === anterior)) sel.value = anterior;
+  } catch (e) {
+    sel.innerHTML = '<option value="">—</option>';
+    state.erroVotos = e;
+  }
+}
+
+/* ---------- resumo ---------- */
+async function loadResumo() {
+  const r = await api('/api/resumo', params());
+  state.total = Number(r.filtradas);
+  const filtrando = $('de').value || $('ate').value;
+  const p = Number(r.total) ? ((state.total / Number(r.total)) * 100).toFixed(1).replace('.', ',') + '% do total' : '';
+  const tx = Number(r.aptos) ? ((Number(r.comparecimento) / Number(r.aptos)) * 100).toFixed(1).replace('.', ',') + '%' : '—';
+  const kpis = [
+    ['Seções (local escolhido)', num(r.total), Number(r.sem_horario) > 0 ? `${num(r.sem_horario)} sem horário` : ''],
+    [filtrando ? 'Seções no horário escolhido' : 'Seções exibidas', num(r.filtradas), filtrando ? p : ''],
+    ['Primeiro encerramento', hhmmss(r.primeiro), dia(r.primeiro)],
+    ['Último encerramento', hhmmss(r.ultimo), dia(r.ultimo)],
+    ['Comparecimento (seleção)', tx, `${num(r.comparecimento)} de ${num(r.aptos)} aptos`],
+  ];
+  $('kpis').innerHTML = kpis.map(([t, v, s]) => `<div class="kpi"><small>${t}</small><b>${v}</b><small>${esc(s)}</small></div>`).join('');
+  $('tituloTabela').textContent = `Seções (${num(r.filtradas)})`;
+}
+
+/* ---------- votos ---------- */
+const nome = (r) => r.nm_votavel || `Nº ${r.nr_votavel}`;
+const chave = (r) => r.nr_votavel + '|' + (r.nm_votavel ?? '');
+
+function tipo(r) {
+  const t = (r.ds_tipo_votavel || '').toLowerCase();
+  const n = (r.nm_votavel || '').toLowerCase();
+  const nr = Number(r.nr_votavel);
+  if (t.includes('branco') || n.includes('branco') || nr === 95) return 'branco';
+  if (t.includes('nulo') || n.includes('nulo') || nr === 96) return 'nulo';
+  return 'candidato';
+}
+
+// Separa candidatos de brancos/nulos e calcula as bases de percentual
+function analisar(resp) {
+  const cand = [];
+  let brancos = 0, nulos = 0;
+  for (const r of resp.linhas) {
+    const t = tipo(r);
+    if (t === 'branco') brancos += r.votos;
+    else if (t === 'nulo') nulos += r.votos;
+    else cand.push(r);
+  }
+  cand.sort((a, b) => b.votos - a.votos);
+  const validos = cand.reduce((s, r) => s + r.votos, 0);
+  return { secoes: resp.secoes, cand, validos, brancos, nulos, total: validos + brancos + nulos };
+}
+
+const msgVotos = (e) => e.status === 404
+  ? 'Faltam os endpoints /api/cargos e /api/votos no server.js. Cole o trecho de votos e reinicie o servidor.'
+  : e.message;
+
+function renderRank(a, de, ate) {
+  $('rankSub').textContent = `${descFiltro(de, ate)} · ${num(a.secoes)} seções · ${num(a.total)} votos`;
+  if (!a.validos) { $('rank').innerHTML = '<div class="msg">Nenhum voto para esse filtro.</div>'; return; }
+
+  const l = a.cand[0], s = a.cand[1];
+  const pl = (l.votos / a.validos) * 100;
+  const margem = s ? pl - (s.votos / a.validos) * 100 : null;
+  const leader = `<div class="leader">
+      <div><small>Na frente</small><div class="who">${esc(nome(l))} <span class="muted" style="font-size:13px;font-weight:400">nº ${esc(l.nr_votavel)}</span></div></div>
+      <div><div class="big">${pct(pl)}</div><small>dos votos válidos</small></div>
+      <div><b>${num(l.votos)}</b><small>votos${s ? ` · ${margem.toFixed(2).replace('.', ',')} p.p. à frente de ${esc(nome(s))}` : ''}</small></div>
+    </div>`;
+
+  const n = state.showAll ? a.cand.length : Math.min(10, a.cand.length);
+  const linhas = a.cand.slice(0, n).map((r, i) => {
+    const pv = (r.votos / a.validos) * 100;
+    const pt = a.total ? (r.votos / a.total) * 100 : 0;
+    return `<tr><td>${i + 1}</td><td>${esc(r.nr_votavel)}</td><td>${esc(nome(r))}</td><td class="r">${num(r.votos)}</td>
+      <td class="r"><b>${pct(pv)}</b></td><td><div class="bar"><i style="width:${Math.min(100, pv)}%"></i></div></td><td class="r">${pct(pt)}</td></tr>`;
+  }).join('');
+  const extra = [['Brancos', a.brancos], ['Nulos', a.nulos]].map(([t, v]) =>
+    `<tr class="sep"><td></td><td></td><td>${t}</td><td class="r">${num(v)}</td><td class="r">—</td><td></td><td class="r">${pct(a.total ? (v / a.total) * 100 : 0)}</td></tr>`).join('');
+  const toggle = a.cand.length > 10
+    ? `<button class="link" id="toggleAll">${state.showAll ? 'Mostrar só os 10 primeiros' : `Ver todos (${num(a.cand.length)})`}</button>` : '';
+
+  $('rank').innerHTML = leader + `<div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>Nº</th><th>Candidato</th><th class="r">Votos</th><th class="r">% válidos</th><th></th><th class="r">% do total</th></tr></thead>
+    <tbody>${linhas}${extra}<tr class="tot"><td></td><td></td><td>Total</td><td class="r">${num(a.total)}</td><td class="r"></td><td></td><td class="r"></td></tr></tbody></table></div>${toggle}`;
+  const t = $('toggleAll');
+  if (t) t.onclick = () => { state.showAll = !state.showAll; renderRank(a, de, ate); };
+}
+
+async function loadVotos(my) {
+  const cargo = $('cargo').value;
+  if (!cargo) {
+    $('rankSub').textContent = '';
+    $('rank').innerHTML = `<div class="msg ${state.erroVotos ? 'err' : ''}">${state.erroVotos ? esc(msgVotos(state.erroVotos)) : 'Nenhum voto carregado para essa eleição.'}</div>`;
+    return;
+  }
+  try {
+    const resp = await api('/api/votos', params({ cargo }));
+    if (my !== state.seq) return;
+    state.analise = analisar(resp);
+    renderRank(state.analise, $('de').value, $('ate').value);
+  } catch (e) {
+    if (my === state.seq) $('rank').innerHTML = `<div class="msg err">${esc(msgVotos(e))}</div>`;
+  }
+}
+
+async function loadComparacao(my) {
+  const cargo = $('cargo').value;
+  if (!cargo) { $('comp').innerHTML = ''; if (state.chartComp) { state.chartComp.destroy(); state.chartComp = null; } return; }
+  try {
+    const resps = await Promise.all(FAIXAS.map((f) => api('/api/votos', params({ cargo, de: f.de, ate: f.ate }))));
+    if (my !== state.seq) return;
+    const an = resps.map(analisar);
+    const top = an[0].cand.slice(0, 5);
+    const pctDe = (a, c) => {
+      const r = a.cand.find((x) => chave(x) === chave(c));
+      return a.validos && r ? (r.votos / a.validos) * 100 : null;
+    };
+
+    const cores = ['--c1', '--c2', '--c3', '--c4'].map(css);
+    const data = {
+      labels: top.map((c) => nome(c).slice(0, 22)),
+      datasets: FAIXAS.map((f, i) => ({ label: f.nome, data: top.map((c) => pctDe(an[i], c)), backgroundColor: cores[i % cores.length], borderRadius: 3 })),
+    };
+    const muted = css('--muted');
+    if (state.chartComp) { state.chartComp.data = data; state.chartComp.update(); }
+    else state.chartComp = new Chart($('chartComp'), {
+      type: 'bar', data,
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: muted } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? '—' : pct(c.parsed.y)}` } } },
+        scales: { x: { ticks: { color: muted }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: muted, callback: (v) => v + '%' } } },
+      },
+    });
+
+    const head = `<tr><th>Faixa</th><th class="r">Seções</th><th class="r">Votos válidos</th>${top.map((c) => `<th class="r">${esc(nome(c).slice(0, 22))}</th>`).join('')}<th>Na frente</th></tr>`;
+    const body = FAIXAS.map((f, i) => {
+      const a = an[i];
+      const vals = top.map((c) => pctDe(a, c));
+      const max = Math.max(...vals.map((v) => v ?? -1));
+      const cells = vals.map((v) => `<td class="r ${v !== null && v === max ? 'best' : ''}">${v === null ? '—' : pct(v)}</td>`).join('');
+      return `<tr><td>${esc(f.nome)}</td><td class="r">${num(a.secoes)}</td><td class="r">${num(a.validos)}</td>${cells}<td>${a.cand[0] ? esc(nome(a.cand[0])) : '—'}</td></tr>`;
+    }).join('');
+    $('comp').innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  } catch (e) {
+    if (my === state.seq) $('comp').innerHTML = `<div class="msg err">${esc(msgVotos(e))}</div>`;
+  }
+}
+
+/* ---------- gráfico de seções por horário ---------- */
+const toMin = (t) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : null);
+const label = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+async function loadChart() {
+  const bucket = Number($('bucket').value);
+  const rows = await api('/api/histograma', params({ de: '', ate: '', bucket }));
+  const de = toMin($('de').value), ate = toMin($('ate').value);
+  const accent = css('--accent'), bar = css('--bar'), text = css('--muted');
+  const filtering = de !== null || ate !== null;
+  const inRange = (m) => (de === null || m + bucket > de) && (ate === null || m < ate);
+  const data = {
+    labels: rows.map((r) => label(r.minuto)),
+    datasets: [{ data: rows.map((r) => r.n), backgroundColor: rows.map((r) => (!filtering || inRange(r.minuto) ? accent : bar)), borderRadius: 3 }],
+  };
+  if (state.chart) { state.chart.data = data; state.chart.update(); return; }
+  state.chart = new Chart($('chart'), {
+    type: 'bar', data,
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${num(c.parsed.y)} seções` } } },
+      scales: { x: { ticks: { color: text, maxRotation: 0, autoSkip: true }, grid: { display: false } }, y: { ticks: { color: text, callback: (v) => num(v) } } },
+    },
+  });
+}
+
+/* ---------- tabela de seções ---------- */
+async function loadTable() {
+  const rows = await api('/api/secoes', params({ page: state.page, limit: state.limit, order: $('order').value }));
+  $('rows').innerHTML = rows.length
+    ? rows.map((r) => `<tr><td>${esc(r.sg_uf)}</td><td>${esc(r.nm_municipio ?? r.cd_municipio)}</td><td>${r.nr_zona}</td><td>${r.nr_secao}</td>
+        <td class="local">${esc(r.nm_local_votacao ?? '—')}</td><td>${num(r.qt_aptos)}</td><td>${num(r.qt_comparecimento)}</td>
+        <td>${hhmmss(r.dt_abertura)}</td><td><b>${hhmmss(r.dt_encerramento)}</b> <small class="muted">${dia(r.dt_encerramento)}</small></td></tr>`).join('')
+    : '<tr><td colspan="9" class="msg">Nenhuma seção encontrada com esses filtros.</td></tr>';
+  const pages = Math.max(1, Math.ceil(state.total / state.limit));
+  $('pageInfo').textContent = `Página ${state.page} de ${num(pages)}`;
+  $('prev').disabled = state.page <= 1;
+  $('next').disabled = state.page >= pages;
+}
+
+/* ---------- orquestração ---------- */
+function markPreset() {
+  document.querySelectorAll('.chips button').forEach((b) => {
+    b.classList.toggle('active', (b.dataset.de ?? '') === $('de').value && (b.dataset.ate ?? '') === $('ate').value && !!($('de').value || $('ate').value));
+  });
+}
+
+async function refresh() {
+  const my = ++state.seq;
+  try {
+    showError(null);
+    state.page = 1;
+    state.showAll = false;
+    markPreset();
+    await loadResumo();
+    // votos e comparação têm tratamento de erro próprio e não derrubam o resto
+    await Promise.all([loadChart(), loadTable(), loadVotos(my), loadComparacao(my)]);
+  } catch (e) { showError(e); }
+}
+
+let timer;
+const debounced = () => { clearTimeout(timer); timer = setTimeout(refresh, 300); };
+
+$('periodo').onchange = async () => { await loadUfs(); await loadCargos(); refresh(); };
+$('uf').onchange = async () => { await loadMunicipios(); refresh(); };
+$('municipio').onchange = refresh;
+$('cargo').onchange = refresh;
+$('bucket').onchange = () => loadChart().catch(showError);
+$('order').onchange = () => { state.page = 1; loadTable().catch(showError); };
+$('de').oninput = debounced;
+$('ate').oninput = debounced;
+document.querySelectorAll('.chips button').forEach((b) => (b.onclick = () => { $('de').value = b.dataset.de; $('ate').value = b.dataset.ate; refresh(); }));
+$('prev').onclick = () => { state.page--; loadTable().catch(showError); };
+$('next').onclick = () => { state.page++; loadTable().catch(showError); };
+
+(async () => {
+  try { await loadPeriodos(); await loadUfs(); await loadCargos(); await refresh(); } catch (e) { showError(e); }
+})();
+</script>
+</body>
+</html>

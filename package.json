@@ -1,0 +1,23 @@
+{
+  "name": "tse-ingest",
+  "version": "1.0.0",
+  "description": "Ingestão de boletins de urna do TSE (por seção) para MySQL",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "migrate": "node src/index.js migrate",
+    "discover": "node src/index.js discover",
+    "ingest": "node src/index.js ingest",
+    "status": "node src/index.js status",
+    "dashboard": "node src/server.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0",
+    "unzipper": "^0.12.3",
+    "express": "^4.21.2"
+  }
+}
